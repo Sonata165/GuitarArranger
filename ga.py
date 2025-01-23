@@ -5,6 +5,46 @@ import random
 from remi_z import MultiTrack, Bar, Note
 import numpy as np
 
+
+def main():
+    # Obtain the input bar from MIDI
+    mt = MultiTrack.from_midi('/Users/sonata/Code/GuitarArranger/misc/caihong-4bar.midi')
+    ref_bar = mt[0]
+
+    # Get melody
+    mel_notes = ref_bar.get_melody('hi_note')
+    print(mel_notes)
+
+    # Get chord
+    chords = ref_bar.get_chord()
+    print(chords)
+
+    # Run GA
+    ga = GeneticAlgorithm(
+        population_size=50, 
+        num_positions=8, 
+        mutation_rate=0.1, 
+        crossover_rate=0.7, 
+        mel_notes=mel_notes,
+        chords=chords,
+    )
+    best_individual, best_fitness = ga.run(num_generations=100)
+
+    # Print results
+    print("Best Individual:")
+    print(best_individual)
+    print("Best Fitness:", best_fitness)
+
+
+def test_visualization():
+    pos = Position([1, 2, 3, 4, 5, 6])
+    print(pos)
+
+    pos2 = Position([2, 3, '-', 5, 6, 7])
+    pos_seq = PositionSeqBar([pos, pos2])
+    print(pos_seq)
+
+
 class Position:
     '''
     A fixed length list (len=6) representing fret number to be pressed on 6 strings
@@ -104,6 +144,9 @@ class PositionSeqBar:
         '''
         mel_pitches = [pos.get_pot_mel() for pos in self.pos_seq]
         return mel_pitches
+    
+    def get_all_notes(self):
+        pass
 
     def calculate_mel_dif(self, mel_notes:List[Note]):
         '''
@@ -178,6 +221,13 @@ class PositionSeqBar:
             return 0
         penalty = sum(penalty) / len(penalty)
         return penalty
+        
+    def calculate_chord_dif(self, ref_chords):
+        ''' Determine the chord of this object '''
+        # Convert this object to two pitch sequence
+
+        # Calculate difference
+        pass
 
 
     def __str__(self):
@@ -310,24 +360,28 @@ class GeneticAlgorithm:
         - position之间
         - block的多个position之间
     '''
-    def __init__(self, population_size, num_positions, mutation_rate, crossover_rate, mel_notes_bars):
+    def __init__(self, population_size, num_positions, mutation_rate, crossover_rate, mel_notes, chords):
         self.population_size = population_size
         self.num_positions = num_positions
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
-        self.mel_notes_bars = mel_notes_bars
+        self.mel_notes = mel_notes
         self.population = [PositionSeqBar.zero_init(num_positions) for _ in range(population_size)]
         self.best_individual = None
         self.best_fitness = float('inf')
+        self.chords = chords
 
     def initialize_population(self):
         for individual in self.population:
             individual.random_fill()
 
     def calculate_fitness(self, individual:PositionSeqBar):
-        mel_dif = individual.calculate_mel_dif(self.mel_notes_bars[0]) # 只计算第一个bar的fitness
+        mel_dif = individual.calculate_mel_dif(self.mel_notes) # 只计算第一个bar的fitness
         pos_pel = individual.calculate_position_penalty()
         intra_pos_pel = individual.calculate_intra_position_penalty()
+
+        # Chord difference
+        chord_dif = individual.calculate_chord_dif(self.chords)
 
         fitness = mel_dif * 100 + pos_pel * 1 + intra_pos_pel
         return fitness
@@ -405,7 +459,8 @@ class GeneticAlgorithm:
                 self.best_fitness = best_in_gen_fitness
                 self.best_individual = best_in_gen
 
-            print(f"Generation {generation + 1}: Best Fitness = {self.best_fitness:.03f}")
+            if generation % 10 == 0:
+                print(f"Generation {generation + 1}: Best Fitness = {self.best_fitness:.03f}")
 
             new_population = []
             winners = self.selection()
@@ -426,49 +481,6 @@ class GeneticAlgorithm:
         return self.best_individual, self.best_fitness
 
 
-def main():
-    pos = Position([1, 2, 3, 4, 5, 6])
-    print(pos)
-
-    pos2 = Position([2, 3, '-', 5, 6, 7])
-    pos_seq = PositionSeqBar([pos, pos2])
-    print(pos_seq)
-
-    # Initialize positions
-    bar_seq = BarSeq.zero_init(4, 8)
-    print(bar_seq)
-
-    # Randomly fill positions
-    bar_seq.random_fill()
-    print(bar_seq)
-
-    # Obtain melody from midi
-    mt = MultiTrack.from_midi('/Users/sonata/Code/GuitarArrange/misc/caihong-4bar.midi')
-    mel_notes_bars = mt.get_melody('hi_note')
-
-    # Get the first bar of our score
-    guitar_bar = bar_seq.bars[0]
-
-    # Get first bar of source score
-    mel_notes = mel_notes_bars[0]
-
-    # Calculate melody similarity
-    # mel_dif = bar_seq.calculate_mel_dif(mel_notes_bars)
-    mel_dif = guitar_bar.calculate_mel_dif(mel_notes)
-    b = 2
-
-    ga = GeneticAlgorithm(
-        population_size=50, 
-        num_positions=8, 
-        mutation_rate=0.1, 
-        crossover_rate=0.7, 
-        mel_notes_bars=mel_notes_bars
-    )
-    best_individual, best_fitness = ga.run(num_generations=100)
-
-    print("Best Individual:")
-    print(best_individual)
-    print("Best Fitness:", best_fitness)
 
 
 
