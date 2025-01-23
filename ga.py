@@ -2,7 +2,7 @@ import os
 import sys
 from typing import List, Tuple
 import random
-from remi_z import MultiTrack, Bar, Note
+from remi_z import MultiTrack, Bar, Note, detect_chord_from_pitch_list
 import numpy as np
 
 
@@ -28,7 +28,7 @@ def main():
         mel_notes=mel_notes,
         chords=chords,
     )
-    best_individual, best_fitness = ga.run(num_generations=100)
+    best_individual, best_fitness = ga.run(num_generations=500)
 
     # Print results
     print("Best Individual:")
@@ -146,7 +146,14 @@ class PositionSeqBar:
         return mel_pitches
     
     def get_all_notes(self):
-        pass
+        pos_seq = self.pos_seq
+        all_notes = []
+        for j, pos in enumerate(pos_seq):
+            for i, fret in enumerate(pos.pos):
+                if fret != '-':
+                    pitch = guitar_fret_to_midi(6 - i, fret)
+                    all_notes.append((j, pitch))
+        return all_notes
 
     def calculate_mel_dif(self, mel_notes:List[Note]):
         '''
@@ -225,9 +232,31 @@ class PositionSeqBar:
     def calculate_chord_dif(self, ref_chords):
         ''' Determine the chord of this object '''
         # Convert this object to two pitch sequence
+        all_notes = self.get_all_notes()
+
+        # Get chord from notes
+        pitch_seq_1 = [note[1] for note in all_notes if note[0] < 4]
+        pitch_seq_2 = [note[1] for note in all_notes if note[0] >= 4]
+        chord_1 = detect_chord_from_pitch_list(pitch_seq_1, return_root_name=True)
+        chord_2 = detect_chord_from_pitch_list(pitch_seq_2, return_root_name=True)
 
         # Calculate difference
-        pass
+        dif = 0
+        if ref_chords[0] is not None:
+            if chord_1 is not None:
+                if chord_1[0] != ref_chords[0][0]:
+                    dif += 0.5
+                if chord_1[1] != ref_chords[0][1]:
+                    dif += 0.5
+        if ref_chords[1] is not None:
+            if chord_2 is not None:
+                if chord_2[0] != ref_chords[1][0]:
+                    dif += 0.5
+                if chord_2[1] != ref_chords[1][1]:
+                    dif += 0.5
+        dif /= 2
+        
+        return dif
 
 
     def __str__(self):
@@ -383,7 +412,10 @@ class GeneticAlgorithm:
         # Chord difference
         chord_dif = individual.calculate_chord_dif(self.chords)
 
-        fitness = mel_dif * 100 + pos_pel * 1 + intra_pos_pel
+        fitness = mel_dif * 100 \
+                + pos_pel * 1 \
+                + intra_pos_pel \
+                + chord_dif * 50
         return fitness
 
     def selection(self):
