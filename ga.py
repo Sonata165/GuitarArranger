@@ -4,6 +4,7 @@ from typing import List, Tuple
 import random
 from remi_z import MultiTrack, Bar, Note, detect_chord_from_pitch_list
 import numpy as np
+from sklearn.metrics import f1_score
 
 
 def main():
@@ -19,14 +20,19 @@ def main():
     chords = ref_bar.get_chord()
     print(chords)
 
+    # Get notes
+    all_notes = ref_bar.get_all_notes()
+    all_notes = [(note.onset, note.pitch) for note in all_notes]
+
     # Run GA
     ga = GeneticAlgorithm(
-        population_size=50, 
+        population_size=100, 
         num_positions=8, 
-        mutation_rate=0.1, 
+        mutation_rate=0.1,
         crossover_rate=0.7, 
         mel_notes=mel_notes,
         chords=chords,
+        notes=all_notes,
     )
     best_individual, best_fitness = ga.run(num_generations=500)
 
@@ -212,7 +218,7 @@ class PositionSeqBar:
             ''' Convert fret range to penalty 
             0~2: 0
             3: 1
-            4: 2
+            4: 200
             > 4: 999
             '''
             if fret_range <= 2:
@@ -220,7 +226,7 @@ class PositionSeqBar:
             elif fret_range == 3:
                 t = 1
             elif fret_range == 4:
-                t = 2
+                t = 200
             else:
                 t = 999
             penalty.append(t)
@@ -239,6 +245,7 @@ class PositionSeqBar:
         pitch_seq_2 = [note[1] for note in all_notes if note[0] >= 4]
         chord_1 = detect_chord_from_pitch_list(pitch_seq_1, return_root_name=True)
         chord_2 = detect_chord_from_pitch_list(pitch_seq_2, return_root_name=True)
+        # print(chord_1, chord_2)
 
         # Calculate difference
         dif = 0
@@ -256,6 +263,19 @@ class PositionSeqBar:
                     dif += 0.5
         dif /= 2
         
+        return dif
+    
+    def calculate_note_dif(self, ref_notes):
+        ''' Determine the chord of this object '''
+        # Get all notes from output
+        all_notes = self.get_all_notes()
+
+        # Calculate F1
+        f1 = calculate_note_recall(all_notes, ref_notes)
+
+        # Convert to min mode
+        dif = 1 - f1
+
         return dif
 
 
@@ -389,7 +409,7 @@ class GeneticAlgorithm:
         - position之间
         - block的多个position之间
     '''
-    def __init__(self, population_size, num_positions, mutation_rate, crossover_rate, mel_notes, chords):
+    def __init__(self, population_size, num_positions, mutation_rate, crossover_rate, mel_notes, chords, notes):
         self.population_size = population_size
         self.num_positions = num_positions
         self.mutation_rate = mutation_rate
@@ -399,6 +419,7 @@ class GeneticAlgorithm:
         self.best_individual = None
         self.best_fitness = float('inf')
         self.chords = chords
+        self.notes = notes
 
     def initialize_population(self):
         for individual in self.population:
@@ -412,10 +433,15 @@ class GeneticAlgorithm:
         # Chord difference
         chord_dif = individual.calculate_chord_dif(self.chords)
 
+        # Note difference
+        note_dif = individual.calculate_note_dif(self.notes)
+
         fitness = mel_dif * 100 \
                 + pos_pel * 1 \
                 + intra_pos_pel \
-                + chord_dif * 50
+                + chord_dif * 50 \
+                + note_dif * 100
+        # print(mel_dif)
         return fitness
 
     def selection(self):
@@ -456,6 +482,7 @@ class GeneticAlgorithm:
 
     def mutation(self, individual):
         for i in range(self.num_positions):
+
             # Position-based
             if random.random() < self.mutation_rate:
                 individual.pos_seq[i].random_fill() # old
@@ -477,6 +504,7 @@ class GeneticAlgorithm:
             #         candidate = [i for i in range(20)] + ['-']
             #         t = random.choice(candidate)
             #         individual.pos_seq[i].pos[j] = t
+            #         b = 2
 
     def run(self, num_generations):
         self.initialize_population()
@@ -512,6 +540,60 @@ class GeneticAlgorithm:
             self.population = new_population
         return self.best_individual, self.best_fitness
 
+
+def calculate_note_recall(out_notes, ref_notes):
+
+    ref_notes = set(ref_notes)
+
+    tot_recall = 0
+    for note in out_notes:
+        if note in ref_notes:
+            tot_recall += 1
+    recall_score = tot_recall / len(ref_notes) if len(ref_notes) > 0 else 1
+    
+    return recall_score
+
+
+def calculate_note_f1(out_notes, ref_notes):
+    out_proll = get_proll_from_seq_q16(out_notes)
+    tgt_proll = get_proll_from_seq_q16(ref_notes)
+
+    f1 = bar_level_note_f1_from_proll(out_proll, tgt_proll)
+    return f1
+
+
+def get_proll_from_seq_q16(seq):
+    '''
+    Convert the sequence to a piano roll with 16th note resolution
+    '''
+    n_pos = 16
+    proll = np.zeros((n_pos, 128), dtype=int)
+    
+    # Quantize
+    pos_q = 0
+    for i, (onset, pitch) in enumerate(seq):
+        # Ensure pos_q and pitch are within the range
+        pos_q = min(max(0, onset), n_pos - 1)
+        pitch = min(max(0, pitch), 127)
+        proll[pos_q, pitch] = 1
+    return proll
+
+
+def bar_level_note_f1_from_proll(proll_out:np.ndarray, proll_ref:np.ndarray):
+    '''
+    Compute the note F1 for a segment-level piano arrangement
+    '''
+    # Binarize
+    proll_ref = (proll_ref > 0).astype(int) # [16, 128]
+    proll_out = (proll_out > 0).astype(int)
+
+    # Flatten
+    proll_ref = proll_ref.flatten()
+    proll_out = proll_out.flatten()
+
+    # Calculate the note F1
+    f1 = f1_score(proll_ref, proll_out)
+    return f1
 
 
 
