@@ -365,31 +365,7 @@ class BarSeq:
         return self.__str__()
 
 
-def guitar_fret_to_midi(string: int, fret: int) -> int:
-    """
-    将吉他弦号和品格数转换为 MIDI 音高 ID。
 
-    吉他弦号：6 (E) 到 1 (e)
-    品格数：0 表示空弦
-
-    如果输入参数为 None 或超出范围，则返回 None。
-    """
-
-    if string is None or fret is None:
-        return None
-
-    if not isinstance(string, int) or not isinstance(fret, int):
-        return None
-
-    if not 1 <= string <= 6 or fret < 0:
-        return None
-
-    # 标准调弦下各弦的 MIDI 音高
-    string_pitches = [40, 45, 50, 55, 59, 64]  # E2, A2, D3, G3, B3, e4
-    string_pitches = string_pitches[::-1]  # 反转，使得索引 0 对应 6 弦
-
-    midi_pitch = string_pitches[string - 1] + fret
-    return midi_pitch
 
 
 class GeneticAlgorithm:
@@ -539,6 +515,33 @@ class GeneticAlgorithm:
             
             self.population = new_population
         return self.best_individual, self.best_fitness
+
+
+def guitar_fret_to_midi(string: int, fret: int) -> int:
+    """
+    将吉他弦号和品格数转换为 MIDI 音高 ID。
+
+    吉他弦号：6 (E) 到 1 (e)
+    品格数：0 表示空弦
+
+    如果输入参数为 None 或超出范围，则返回 None。
+    """
+
+    if string is None or fret is None:
+        return None
+
+    if not isinstance(string, int) or not isinstance(fret, int):
+        return None
+
+    if not 1 <= string <= 6 or fret < 0:
+        return None
+
+    # 标准调弦下各弦的 MIDI 音高
+    string_pitches = [40, 45, 50, 55, 59, 64]  # E2, A2, D3, G3, B3, e4
+    string_pitches = string_pitches[::-1]  # 反转，使得索引 0 对应 6 弦
+
+    midi_pitch = string_pitches[string - 1] + fret
+    return midi_pitch
 
 
 def calculate_note_recall(out_notes, ref_notes):
