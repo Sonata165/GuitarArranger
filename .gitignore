@@ -2,6 +2,7 @@
 REMI-z
 .DS_Store
 Cubase Projects
+outputs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
