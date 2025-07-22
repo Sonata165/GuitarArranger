@@ -1,6 +1,7 @@
 from fretboard_util import Fretboard
 import numpy as np
 from remi_z import Bar, MultiTrack
+from typing import List
 
 class Chart:
     '''
@@ -256,7 +257,7 @@ class TabSeq:
     A container for multiple Tabs.
     For user-friendly display of song-level tabs.
     '''
-    def __init__(self, tab_list=None):
+    def __init__(self, tab_list:List[Tab]=None):
         '''
         Initialize with a list of Tab objects.
         '''
