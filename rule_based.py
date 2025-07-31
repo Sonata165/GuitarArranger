@@ -13,7 +13,7 @@ from pydub import AudioSegment
 def main():
     arranger = ArrangerSystem()
     midi_fp = 'misc/caihong-4bar.midi'
-    midi_fp = 'misc/canon_in_D.mid'
+    # midi_fp = 'misc/canon_in_D.mid'
     arranger.arrange_song_from_midi(midi_fp)
 
 
