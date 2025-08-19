@@ -683,7 +683,8 @@ class Fretboard:
                     string_press_once: bool = True, 
                     enforce_root: bool = True, 
                     closed: bool = False,
-                    force_highest_pitch: Optional[str] = None
+                    force_highest_pitch: Optional[str] = None,
+                    force_highest_string: Optional[int] = None
                     ) -> List[Tuple[int, int]]:
         """Press a chord at a specific position.
         
@@ -694,7 +695,8 @@ class Fretboard:
             enforce_root: If True, ensure the lowest pressed string plays the root note
             closed: If True, do not use any open strings (0-fret notes)
             force_highest_pitch: If set, do not press any chord note whose pitch is strictly larger than this note (e.g., 'C#3')
-        
+            force_highest_string: If set, do not press any chord note whose string number is strictly larger than this number
+            
         Returns:
             List of (string_id, fret) tuples for the pressed positions
         """
@@ -729,6 +731,15 @@ class Fretboard:
                 pitch = self.get_pitch(string_id - 1, fret)
                 if pitch <= max_pitch:
                     filtered_positions.append((string_id, fret))
+            all_positions = filtered_positions
+            
+        # Apply force_highest_string filter if set
+        if force_highest_string is not None:
+            filtered_positions = []
+            for string_id, fret in all_positions:
+                if string_id <= force_highest_string:
+                    filtered_positions.append((string_id, fret))
+                    continue
             all_positions = filtered_positions
         
         if not string_press_once:

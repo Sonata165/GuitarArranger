@@ -36,6 +36,20 @@ def generate_all_possible_positions():
                 config = infer_info(tab, fingering, position)
                 positions.append(config)
 
+                # Case: add one more open string
+                all_strings = set(range(1, 7))
+                usable_strings = all_strings - {string}
+                for open_string in usable_strings:
+                    tab_open = tab.copy()
+                    tab_open[open_string - 1] = 0
+                    fingering_open = fingering.copy()
+                    fingering_open[open_string - 1] = 0
+
+                    config_open = infer_info(tab_open, fingering_open, position)
+                    positions.append(config_open)
+
+    # ''' Single note positions with open strings '''
+
     ''' Open chord positions '''
     chord_and_fingers = [
         (['x',3,2,0,1,0], [0,3,2,0,1,0], 1),        # C
@@ -119,7 +133,7 @@ def generate_all_possible_positions():
     positions = list(unique_positions.values())
 
     print(len(positions))
-    save_fp = jpath('diagram_config', 'possible_positions.jsonl')
+    save_fp = jpath('diagram_config', 'possible_positions_0814.jsonl')
     save_jsonl(positions, save_fp)
     
     

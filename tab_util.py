@@ -195,10 +195,14 @@ class Tab:
         Return a string representation of the tab.
         Each row represents a string, each column a position.
         -1 means no note pressed.
+        Each position is 2 characters wide, separated by a single space.
         """
         lines = []
         for s in range(self.matrix.shape[0]):
-            line = ' '.join(['-' if self.matrix[s, p] == -1 else str(self.matrix[s, p]) for p in range(self.matrix.shape[1])])
+            line = ' '.join([
+                '--' if self.matrix[s, p] == -1 else str(self.matrix[s, p]).rjust(2)
+                for p in range(self.matrix.shape[1])
+            ])
             lines.append(line)
         return '\n'.join(lines)
 
@@ -216,8 +220,7 @@ class Tab:
 
     def add_chord(self, position_id, chord_name:str):
         '''
-        Add a chord to the tab at the specified position.
-        Chord is a Chart object.
+        Add a chord name to the tab at the specified position.
         '''
         if position_id < 0 or position_id >= self.matrix.shape[1]:
             raise ValueError(f"Position must be between 0 and {self.matrix.shape[1] - 1}.")
@@ -293,12 +296,13 @@ class TabSeq:
                         first_pos = sorted_positions[0]
                         chord1 = tab.chord_dict[first_pos]
                         # Place chord1 at the start
-                        chord_line_pos = first_pos * 2  # Each position is 2 chars (including space)
+                        # Each position is 3 chars: 2 for fret, 1 for space
+                        chord_line_pos = first_pos * 3
                         chord_line[chord_line_pos:chord_line_pos+len(chord1)] = chord1
                     if len(sorted_positions) > 1:
                         second_pos = sorted_positions[1]
                         chord2 = tab.chord_dict[second_pos]
-                        chord_line_pos = second_pos * 2
+                        chord_line_pos = second_pos * 3
                         chord_line[chord_line_pos:chord_line_pos+len(chord2)] = chord2
                 chord_name_lines.append(''.join(chord_line))
             lines.append('   '.join(chord_name_lines))
@@ -306,6 +310,7 @@ class TabSeq:
             for line_idx in range(tab_height):
                 row_line = '   '.join(tab[line_idx] for tab in row_tabs)
                 lines.append(row_line)
+            lines.append('')
         return '\n'.join(lines)
     
     def save_to_file(self, filename):

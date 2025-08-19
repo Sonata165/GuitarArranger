@@ -1,8 +1,10 @@
 from tab_util import Chart, Tab
 from fretboard_util import Fretboard
+from remi_z import NoteSeq
 
 def main():
-    test_tab()
+    # test_tab()
+    test_chart()
 
 def procedures():
     test_chart()
@@ -49,6 +51,22 @@ def test_chart():
     chart = Chart(string_fret_list=mel_sf)
     print(chart)
     # [G3 G4 B3 E3 G3 E3 B3 E3]
+    print('\n')
+
+
+    mel_sf = fretboard.press_note_set(note_set=['F#3', 'A3'], lowest_fret=7)
+    chord_upper_pitch_limit = 54 # F#3
+    
+    chord_note_sfs = fretboard.press_chord('D', 
+                                            position=6, 
+                                            string_press_once=False, 
+                                            enforce_root=True,
+                                            closed=False,
+                                            force_highest_pitch='F#3',
+                                            )
+    chart = Chart(string_fret_list=chord_note_sfs)
+    chart.fret_more_note(mel_sf)
+    print(chart)
 
     # # D major shape at 10th fret: frets 10, 12, 11, 10
     # chart = Chart(string_fret_list=[(2, 11), (3, 10), (4, 10), (5, 12)])

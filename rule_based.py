@@ -1,45 +1,81 @@
 '''
 这个文件用来描述Rule-Based Guitar Arranger的伪代码
 '''
-from remi_z import MultiTrack, NoteSeq, ChordSeq, midi_pitch_to_note_name, Note
+from remi_z import MultiTrack, NoteSeq, ChordSeq, midi_pitch_to_note_name, Note, note_name_to_midi_pitch
 from typing import List
 from fretboard_util import Fretboard
 from tab_util import Chart, Tab, TabSeq
 import fluidsynth
 import subprocess
 from pydub import AudioSegment
+from sonata_utils import jpath, create_dir_if_not_exist
+import random
 
 
 def main():
     arranger = ArrangerSystem()
-    midi_fp = 'misc/caihong-4bar.midi'
+    midi_fp = 'misc/midi_normalized/caihong.mid'
     # midi_fp = 'misc/canon_in_D.mid'
     arranger.arrange_song_from_midi(midi_fp)
 
 
 class ArrangerSystem:
     def __init__(self):
-        self.mt = None
+        self.mt:MultiTrack = None
         self.voicer = Voicer()
         self.arpeggiator = Arpeggiator()
 
     def arrange_song_from_midi(self, midi_fp):
         song_name = midi_fp.split('/')[-1].split('.')[0]
         print(f'Arranging song: {song_name}')
+        
+        bar_start = 4
+        bar_duration = 8
+        bar_end = bar_start + bar_duration
 
-        self.mt = MultiTrack.from_midi(midi_fp)[:8] # [0:1]
+        save_name = f'{song_name}_bar_{bar_start}_{bar_end}'
+        save_dir = jpath('outputs', song_name, f'{save_name}')
+        create_dir_if_not_exist(save_dir)
+        
+        # self.mt = MultiTrack.from_midi(midi_fp)[4:12] # [0:1]
+        # self.mt = MultiTrack.from_midi(midi_fp)[12:20] # [0:1]
+        # self.mt = MultiTrack.from_midi(midi_fp)[20:28] # [0:1]
+        # self.mt = MultiTrack.from_midi(midi_fp)[28:36] # [0:1]
+        # self.mt = MultiTrack.from_midi(midi_fp)[44:52] # [0:1]
+
+        self.mt = MultiTrack.from_midi(midi_fp)[bar_start:bar_end]
+
         self.mt.quantize_to_16th()
         # self.mt.shift_pitch(-5)
-        self.mt.shift_pitch(2)
+        # self.mt.shift_pitch(-12)
+        # self.mt.shift_pitch(-7)
+        # self.mt.shift_pitch(2)
 
         # Prepare model inputs
         notes_of_bars = self.get_all_notes()
-        melody = self.extract_melody()
+        melody = self.extract_melody() # a list of NoteSeq
         chord_of_bars = self.extract_chord()
+
+        # Melody range normalization
+        melody = self.normalize_melody_range(melody)
+        # Save melody to file
+        melody_fp = jpath(save_dir, f'{save_name}_melody.mid')
+        melody_mt = MultiTrack.from_note_seqs(melody, program_id=25) # 24在garadgeband里全是滑音，太奇怪了
+        print(f'Saving melody to {melody_fp}')
+        melody_mt.to_midi(melody_fp)
+
+        # Synthesize the melody to WAV
+        sf_path = 'resources/Tyros Nylon.sf2'
+        melody_audio_fp = jpath(save_dir, f'{save_name}_melody.wav')
+        print(f'Synthesizing melody MIDI to WAV: {melody_audio_fp}')
+        self.midi_to_wav(melody_fp, sf_path, melody_audio_fp)
+        self.post_process_wav(melody_audio_fp, silence_thresh_db=-40.0, padding_ms=200, target_dbfs=-0.1)
 
         # Get chart sequence (left hand modeling)
         chart_seq = self.voicer.generate_chart_sequence_for_song(melody, chord_of_bars)
-        chart_fp = f'{song_name}.chart'
+        if not chart_seq or len(chart_seq) == 0:
+            raise ValueError('No chart sequence generated. Please check model robustness.')
+        chart_fp = jpath(save_dir, f'{save_name}_chart.txt')
         print(f'Saving chart sequence to {chart_fp}')
         self.voicer.save_chart_sequence_to_file(chart_seq, chart_fp)
 
@@ -47,7 +83,7 @@ class ArrangerSystem:
         song_tab = self.arpeggiator.arpeggiate_a_song(melody, chart_seq, notes_of_bars)
 
         # Save the tab to file
-        tab_fp = f'{song_name}.tab'
+        tab_fp = jpath(save_dir, f'{save_name}_tab.txt')
         print(f'Saving tab to {tab_fp}')
         song_tab.save_to_file(tab_fp)
 
@@ -60,17 +96,38 @@ class ArrangerSystem:
 
         # Save the note sequence to MIDI
         # midi_fp = 'test_out.mid'
-        midi_fp = f'{song_name}.midi'
+        midi_fp = jpath(save_dir, f'{save_name}.midi')
         print(f'Saving MIDI to {midi_fp}')
         mt.to_midi(midi_fp)
 
         # Synthesize the MIDI to WAV
         sf_path = 'resources/Tyros Nylon.sf2'
-        audio_fp = f'{song_name}.wav'
+        audio_fp = jpath(save_dir, f'{save_name}.wav')
         # wav_fp = 'test_out.wav'
         print(f'Synthesizing MIDI to WAV: {audio_fp}')
         self.midi_to_wav(midi_fp, sf_path, audio_fp)
         self.post_process_wav(audio_fp, silence_thresh_db=-40.0, padding_ms=200, target_dbfs=-0.1)
+
+
+    def normalize_melody_range(self, melody_of_bars:List[NoteSeq]):
+        '''
+        Normalize the melody range to a specific range
+        Target range: D3 (MIDI 50) to G5 (MIDI 79)
+        '''
+        LOW_NOTE = 'A2' # D3 (4th string) or A2 (5th string)
+        HIGH_NOTE = 'A5'
+        LOW = note_name_to_midi_pitch(LOW_NOTE)
+        HIGH = note_name_to_midi_pitch(HIGH_NOTE)
+        print(f'Normalizing melody range to {LOW_NOTE} - {HIGH_NOTE} ({LOW} - {HIGH})')
+        for note_seq in melody_of_bars:
+            for note in note_seq.notes:
+                while note.pitch < LOW:
+                    note.pitch += 12
+                    print('shift up')
+                while note.pitch > HIGH:
+                    note.pitch -= 12
+                    print('shift down')
+        return melody_of_bars
 
     
     def midi_to_note_seq(self, midi_fp):
@@ -86,8 +143,15 @@ class ArrangerSystem:
 
         return note_seq_per_bar
     
-    def extract_melody(self):
-        melody = self.mt.get_melody('hi_note')
+    def extract_melody(self) -> List[NoteSeq]:
+        '''
+        Naively extract melody from the multi-track MIDI
+        
+        We assume the track with the highest average pitch is the melody track.
+        '''
+        melody = self.mt.get_melody_of_song('hi_track')   # Highest track in each bar
+        # melody = self.mt.get_melody('hi_track')   # Highest track in each bar
+        # melody = self.mt.get_melody('hi_note')  # Highest note in each position
         ret = []
         for melody_of_bar in melody:
             ret.append(NoteSeq(melody_of_bar))
@@ -177,7 +241,10 @@ class Voicer:
         melody = block.melody.get_note_name_list()
         possible_positions = self.fretboard.find_all_playable_position_of_note_set(melody)
         melody_pitch_range = block.melody.get_pitch_range()
-        chord_upper_pitch_limit = melody_pitch_range[0]
+        if melody_pitch_range is None:
+            chord_upper_pitch_limit = note_name_to_midi_pitch('D5')
+        else:
+            chord_upper_pitch_limit = melody_pitch_range[0]
         lowest_melody_note = midi_pitch_to_note_name(chord_upper_pitch_limit)
 
         # If no possible position, raise warning
@@ -199,18 +266,25 @@ class Voicer:
                                                         force_highest_pitch=lowest_melody_note,
                                                         )
             
-            # If fail to press this chord, skip this position
-            thres = 1 # at least we want 2 useable strings in the chord note
-            chord_strings = set([sf[0] for sf in chord_note_sfs])
-            if len(chord_strings) < thres:
-                continue
-
-            # Draw a chart
-            chord_name = f'{block.chord[0]}{block.chord[1]}'
-            chart = Chart(string_fret_list=chord_note_sfs, chord_name=chord_name)
+            if chord_str == 'D': # debug
+                a = 2
 
             # Press the melody notes in that position
             melody_note_sfs = self.fretboard.press_note_set(note_set=melody, lowest_fret=position)
+
+            # If fail to press this chord, skip this position
+            # We want at least one string that is not used by melody
+            melody_strings = set([sf[0] for sf in melody_note_sfs])
+            thres = 1 # at least we want {thres} useable strings in the chord note
+            chord_strings = set([sf[0] for sf in chord_note_sfs])
+            # get non-melody strings in chord
+            non_mel_chord_strings = chord_strings - melody_strings
+            if len(non_mel_chord_strings) < thres:
+                continue
+
+            # Draw a chart, add chord notes
+            chord_name = f'{block.chord[0]}{block.chord[1]}'
+            chart = Chart(string_fret_list=chord_note_sfs, chord_name=chord_name)
 
             # Add the melody notes to the chart
             melody_str = ' '.join(melody)
@@ -344,8 +418,8 @@ class Arpeggiator:
         该策略在尽量还原原曲的同时，控制右手复杂度，并利用简单规则生成合理可演奏的填充纹理。
 
         '''
-        notes_first_half = [note for note in notes_of_the_bar.notes if note.onset < 24]
-        notes_second_half = [note for note in notes_of_the_bar.notes if note.onset >= 24]
+        notes_first_half = NoteSeq([note for note in notes_of_the_bar.notes if note.onset < 24])
+        notes_second_half = NoteSeq([note for note in notes_of_the_bar.notes if note.onset >= 24])
         melody_first_half = NoteSeq([note for note in melody.notes if note.onset < 24])
         melody_second_half = NoteSeq([note for note in melody.notes if note.onset >= 24])
         assert len(chart_list_of_the_bar) == 2, "There should be exactly 2 charts for a bar."
@@ -359,10 +433,12 @@ class Arpeggiator:
         # 2. Bass note onset position
         bass_note_1_class = chart_list_of_the_bar[0].chord_name[:1] if '#' not in chart_list_of_the_bar[0].chord_name else chart_list_of_the_bar[0].chord_name[:2]
         bass_note_2_class = chart_list_of_the_bar[1].chord_name[:1] if '#' not in chart_list_of_the_bar[1].chord_name else chart_list_of_the_bar[1].chord_name[:2]
-        bass_note_1 = get_bass_note_seq(notes_of_the_bar, bass_note_1_class)
-        bass_note_2 = get_bass_note_seq(notes_of_the_bar, bass_note_2_class)
+        bass_note_1 = get_bass_note_seq(notes_first_half, bass_note_1_class)
+        bass_note_2 = get_bass_note_seq(notes_second_half, bass_note_2_class)
         bass_notes = NoteSeq(bass_note_1.notes + bass_note_2.notes)
         bass_onset_positions = [note.onset // 6 for note in bass_notes.notes]
+        bass_note_onset_pos_1 = [note.onset // 6 for note in bass_note_1.notes]
+        bass_note_onset_pos_2 = [note.onset // 6 for note in bass_note_2.notes]
 
         # 3. Filling note density by position
         fillings = get_filling_notes(notes_of_the_bar, melody, bass_notes)
@@ -379,24 +455,34 @@ class Arpeggiator:
         chart_2 = chart_list_of_the_bar[1]
         psf_1 = self.get_psf_from_chart(melody_first_half, chart_1)
         psf_2 = self.get_psf_from_chart(melody_second_half, chart_2)
-        for psf in psf_1:
+        melody_psf = psf_1 + psf_2
+        # Add melody notes to the tab
+        for psf in melody_psf:
             pos, string_id, fret, note_name = psf
             tab.add_note(pos, string_id, fret)
-        for psf in psf_2:
-            pos, string_id, fret, note_name = psf
-            tab.add_note(pos, string_id, fret)
+        # for psf in psf_1:
+        #     pos, string_id, fret, note_name = psf
+        #     tab.add_note(pos, string_id, fret)
+        # for psf in psf_2:
+        #     pos, string_id, fret, note_name = psf
+        #     tab.add_note(pos, string_id, fret)
+        
         
         # Fill bass note to bass position
-        bass_psf_1 = self.get_psf_from_chart(bass_note_1, chart_1)
-        bass_psf_2 = self.get_psf_from_chart(bass_note_2, chart_2)
-        for psf in bass_psf_1:
-            pos, string_id, fret, note_name = psf
+        # Get string-fret pair for bass notes (chord root) from the chart
+        bass_notes_psf = []
+        bass_sf_1 = self.get_bass_sf_from_chart(chart_1)
+        bass_sf_2 = self.get_bass_sf_from_chart(chart_2)
+        for pos in bass_note_onset_pos_1:
+            string_id, fret = bass_sf_1
             tab.add_note(pos, string_id, fret)
-        for psf in bass_psf_2:
-            pos, string_id, fret, note_name = psf
+            bass_notes_psf.append((pos, string_id, fret))
+        for pos in bass_note_onset_pos_2:
+            string_id, fret = bass_sf_2
             tab.add_note(pos, string_id, fret)
+            bass_notes_psf.append((pos, string_id, fret))
 
-        # Add chord
+        # Add chord name to the tab
         chord_1 = chart_1.chord_name
         chord_2 = chart_2.chord_name
         tab.add_chord(0, chord_1)
@@ -405,6 +491,8 @@ class Arpeggiator:
         # Add fills: 
         '''
         这个算法用于为吉他独奏编曲中的“填充声部”（filling）部分分配右手手指（或弦位），以最大程度还原原曲质感。
+
+        首先，在没有弹奏任何主旋律和低音的情况下，放上剩下的音符中最高音的音符
 
         首先，从去除主旋律和低音后的原曲 MIDI 中提取每个位置的填充音符，识别出在每个和弦块（chord block）中 
             filling 部分的最高音，并将这些最高音连成一个“filling melody contour”。根据该 contour 的平均音高判断其整体处于高音区还是低音区。
@@ -416,6 +504,124 @@ class Arpeggiator:
 
         该策略在尽量还原原曲的同时，控制右手复杂度，并利用简单规则生成合理可演奏的填充纹理。
         '''
+        # Step 1: Find all positions that need filling notes (positions that does not have melody notes)
+        all_positions = set(range(0, 8))
+        melody_positions = set(melody_onset_positions)
+        filling_positions = all_positions - melody_positions # - set(bass_onset_positions)
+        filling_positions = list(filling_positions)
+        filling_positions.sort()  # Sort positions for consistent processing
+
+        # If no filling positions, return the tab with melody and bass notes only
+        if len(filling_positions) == 0:
+            return tab
+
+        # Check melody notes occupy which string in each position
+        melody_strings_used_by_position = [-1]*8 # String 6~1 means lowest to highest. 0 means no melody note
+        for psf in melody_psf:
+            pos, string_id, fret, note_name = psf
+            if string_id > 0:
+                melody_strings_used_by_position[pos] = string_id
+        # Fill in melody strings for positions without melody notes
+        for pos in range(1, len(melody_strings_used_by_position)):
+            prev_melody_string = melody_strings_used_by_position[pos - 1]
+            if melody_strings_used_by_position[pos] == -1:
+                # If no melody string used, use the previous melody string
+                melody_strings_used_by_position[pos] = prev_melody_string
+            
+        # Check which string is occupied by bass note for each filling position
+        bass_strings_used_by_position = [-1]*8 # String 6~1 means lowest to highest. 0 means no bass note
+
+        # Check if any usable filling notes in the chart (higher than bass string)
+        for psf in bass_notes_psf:
+            pos, string_id, fret = psf
+            if string_id > 0:  
+                bass_strings_used_by_position[pos] = string_id
+        for pos in range(1, len(bass_strings_used_by_position)):
+            prev_bass_string = bass_strings_used_by_position[pos - 1]
+            if bass_strings_used_by_position[pos] == -1:
+                # If no bass string used, use the previous bass string
+                bass_strings_used_by_position[pos] = prev_bass_string
+
+        # Step 2: Determine the countour of filling notes
+        sub_mel_pitch = [0] * 8
+        for pos in filling_positions:
+            # Get the highest note in the filling contour at this position
+            highest_note = sub_melody_contour.get(pos, None)
+            if highest_note is not None:
+                sub_mel_pitch[pos] = highest_note.pitch
+        all_sub_mel_pitch = [pitch for pitch in sub_mel_pitch if pitch > 0]  # Filter out zero pitches
+
+        # Do a binary classification of it, to determine assign to high or low string
+        voice_assign = [-1] * 8  # -1 means not assigned, 0 means low string, 1 means high string
+        sub_mel_pitch_mean = sum(all_sub_mel_pitch) / len(all_sub_mel_pitch)
+        for pos in filling_positions:
+            if sub_mel_pitch[pos] > sub_mel_pitch_mean:
+                voice_assign[pos] = 1
+            else:
+                voice_assign[pos] = 0
+        voice_first_half = voice_assign[:4]
+        voice_second_half = voice_assign[4:]
+        bass_string_first_half = bass_strings_used_by_position[:4]
+        bass_string_second_half = bass_strings_used_by_position[4:]
+
+        # For each half of the bar, assign filling notes
+        # Determine strings to use for filling notes based on voice_assign, bass_string_used_by_position, and melody_strings_used_by_position
+        string_to_use = [-1] * 8  # (low_string, high_string) for each position
+        for pos in filling_positions:
+            mel_string = melody_strings_used_by_position[pos]
+            bass_string = bass_strings_used_by_position[pos]
+            usable_strings = set(range(1, 7))  # Strings 1 to 6
+            # Deduct bass string and lower strings
+            if bass_string > 0:
+                usable_strings -= set(range(bass_string, 7))
+            # Deduct melody string and higher strings
+            if mel_string > 0:
+                usable_strings -= set(range(1, mel_string + 1))
+            n_usable_strings = len(usable_strings)
+            if n_usable_strings >= 2:
+                # If there are at least 2 usable strings, assign to the higher string for high voice and lower string for low voice
+                if voice_assign[pos] == 1: # High voice
+                    string_to_use[pos] = bass_string - 2 # Use 2 strings higher than bass string
+                elif voice_assign[pos] == 0: # Low voice
+                    string_to_use[pos] = bass_string - 1 # Use one string higher than bass string
+            elif n_usable_strings == 1:
+                # Use the only usable string as low string, and repeat melody string as high string
+                if voice_assign[pos] == 1: # High voice
+                    string_to_use[pos] = mel_string
+                elif voice_assign[pos] == 0: # Low voice
+                    string_to_use[pos] = bass_string - 1
+            else:
+                # No usable strings
+                # Use the bass string as low string, and repeat melody string as high string
+                if voice_assign[pos] == 1: # High voice
+                    string_to_use[pos] = mel_string
+                elif voice_assign[pos] == 0: # Low voice
+                    string_to_use[pos] = bass_string
+
+        sfs_1 = chart_1.string_fret_list
+        sfs_2 = chart_2.string_fret_list
+        # Fill the filling notes into the tab
+        for pos in filling_positions:
+            # Get the string to use for this position
+            string_id = string_to_use[pos]
+
+            # Get all useable sf positions from the chart
+            if pos < 4:
+                sfs = sfs_1
+            else:
+                sfs = sfs_2
+            # Find the fret for this string in the chart
+            sf_of_the_string = [sf for sf in sfs if sf[0] == string_id]
+            if len(sf_of_the_string) == 0:
+                # If no string-fret pair found, skip this position
+                continue
+            # If there are multiple string-fret pairs, randomly choose one
+            sf_selected = random.choice(sf_of_the_string)
+            psf = (pos, sf_selected[0], sf_selected[1])  # (position, string_id, fret)
+
+            tab.add_note(psf[0], psf[1], psf[2])  # Add the note to the tab
+            b = 2
+
         a = 2
 
         return tab
@@ -443,6 +649,23 @@ class Arpeggiator:
             string_id, fret = sf
             result.append((pos, string_id, fret, note_name))
         return result
+    
+
+    def get_bass_sf_from_chart(self, chart: 'Chart') -> list:
+        """
+        Get the string-fret pair for the bass note (chord root) from the chart.
+
+        Args:
+            chart: Chart object containing string-fret mapping for the bar.
+
+        Returns:
+            List of tuples (string_id, fret) for the bass note.
+        """
+        # Return the SF with lowest string (largest string ID), and then lowest fret (smallest fret number)
+        all_sfs = chart.string_fret_list
+        bass_sf = min(all_sfs, key=lambda sf: (-sf[0], sf[1]))
+        return bass_sf
+
 
     def arpeggiate_a_song(self, melody, chart_list_of_the_song, note_seq_of_the_song) -> TabSeq:
         # Group chart_list by bar
@@ -475,8 +698,29 @@ class DurationRenderer:
         return note_seq
     
 
-def get_bass_note_seq(note_seq: 'NoteSeq', chord_root: str) -> 'NoteSeq':
+def get_bass_note_seq(note_seq: 'NoteSeq', chord_root: str = None) -> 'NoteSeq':
     """
+    Given a NoteSeq, find the note(s) with the lowest pitch among all notes.
+    Return a new NoteSeq containing all notes with that lowest pitch.
+
+    Args:
+        note_seq: NoteSeq object containing notes (each note must have .onset, .get_note_name(), .pitch).
+        chord_root: (Unused) The root note name of the chord (e.g., "C", "G#", "A").
+
+    Returns:
+        NoteSeq containing all notes with the lowest pitch.
+    """
+    if not note_seq.notes:
+        return NoteSeq([])
+    min_pitch = min(note.pitch for note in note_seq.notes)
+    bass_notes = [note for note in note_seq.notes if note.pitch == min_pitch]
+    return NoteSeq(bass_notes)
+
+
+def get_bass_note_seq_old(note_seq: 'NoteSeq', chord_root: str) -> 'NoteSeq':
+    """
+    Old version, bass's definition consider both lowest note and the chord root
+
     Given a NoteSeq, find the bass note (lowest pitch) at each onset position
     whose pitch class matches the chord root, and return a new NoteSeq containing
     these bass notes. Only keep bass notes in the most common octave among matched notes.
