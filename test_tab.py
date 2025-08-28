@@ -1,10 +1,10 @@
-from tab_util import Chart, Tab
+from tab_util import Chart, Tab, TabSeq
 from fretboard_util import Fretboard
 from remi_z import NoteSeq
 
 def main():
-    # test_tab()
-    test_chart()
+    test_tab()
+    # test_chart()
 
 def procedures():
     test_chart()
@@ -13,6 +13,14 @@ def test_tab():
     tab = Tab()
     tab.add_note(5, 3, 7)
     print(tab)
+
+    tab1 = Tab()
+    tab2 = Tab()
+    tab3 = Tab()
+    tab4 = Tab()
+    tab5 = Tab()
+    t = TabSeq([tab1, tab2, tab3, tab4, tab5], tab_per_row=2)
+    print(t)
 
 def test_chart():
     # # C major open chord: frets 0, 1, 2, 3

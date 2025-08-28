@@ -29,20 +29,14 @@ class ArrangerSystem:
         song_name = midi_fp.split('/')[-1].split('.')[0]
         print(f'Arranging song: {song_name}')
         
-        bar_start = 4
-        bar_duration = 8
+        bar_start = 0
+        bar_duration = 4
         bar_end = bar_start + bar_duration
 
         save_name = f'{song_name}_bar_{bar_start}_{bar_end}'
         save_dir = jpath('outputs', song_name, f'{save_name}')
         create_dir_if_not_exist(save_dir)
         
-        # self.mt = MultiTrack.from_midi(midi_fp)[4:12] # [0:1]
-        # self.mt = MultiTrack.from_midi(midi_fp)[12:20] # [0:1]
-        # self.mt = MultiTrack.from_midi(midi_fp)[20:28] # [0:1]
-        # self.mt = MultiTrack.from_midi(midi_fp)[28:36] # [0:1]
-        # self.mt = MultiTrack.from_midi(midi_fp)[44:52] # [0:1]
-
         self.mt = MultiTrack.from_midi(midi_fp)[bar_start:bar_end]
 
         self.mt.quantize_to_16th()
@@ -158,7 +152,7 @@ class ArrangerSystem:
         return ret
 
     def get_all_notes(self):
-        notes_of_bars = self.mt.get_all_notes_by_bar()
+        notes_of_bars = self.mt.get_all_notes_by_bar(include_drum=False)
         ret = []
         for notes_of_bar in notes_of_bars:
             ret.append(NoteSeq(notes_of_bar))
@@ -390,8 +384,9 @@ class Arpeggiator:
     Takes in a sequence of chart, and a note sequence as texture reference,
     Generate tab
     '''
-    def __init__(self):
+    def __init__(self, time_res=16):
         self.fretboard = Fretboard()
+        self.time_res = time_res # default to 16 positions per bar, 16th note resolution
         
     def calculate_groove_for_a_bar(note_seq):
         '''
@@ -405,19 +400,13 @@ class Arpeggiator:
 
     def arpeggiate_a_bar(self, melody, chart_list_of_the_bar:List[Chart], notes_of_the_bar:NoteSeq):
         '''
-        这个算法用于为吉他独奏编曲中的“填充声部”（filling）部分分配右手手指（或弦位），以最大程度还原原曲质感。
-
-        首先，从去除主旋律和低音后的原曲 MIDI 中提取每个位置的填充音符，识别出在每个和弦块（chord block）中 
-            filling 部分的最高音，并将这些最高音连成一个“filling melody contour”。根据该 contour 的平均音高判断其整体处于高音区还是低音区。
-
-        接着，计算每个非主旋律、非低音位置上的填充音符密度，并取所有位置的中位数作为 density 阈值。
-
-        最后，对于每个 filling 位置，若其密度高于中位数，则分配两个手指进行填充（即两个音）；否则仅分配一个音，
-            并根据 filling melody contour 所在音区，选择靠近的高音弦或低音弦来放置音符。
-
-        该策略在尽量还原原曲的同时，控制右手复杂度，并利用简单规则生成合理可演奏的填充纹理。
-
+        Given a bar of melody, chart sequence (2 charts), and all notes in the bar,
+        Generate a tab for the bar
         '''
+        MAX_POSITIONS = self.time_res
+        remi_z_time_res = 48
+        coeff = remi_z_time_res // MAX_POSITIONS
+
         notes_first_half = NoteSeq([note for note in notes_of_the_bar.notes if note.onset < 24])
         notes_second_half = NoteSeq([note for note in notes_of_the_bar.notes if note.onset >= 24])
         melody_first_half = NoteSeq([note for note in melody.notes if note.onset < 24])
@@ -428,7 +417,7 @@ class Arpeggiator:
         # Feature extraction, getting 
 
         # 1. Melody note onset position
-        melody_onset_positions = [note.onset // 6 for note in melody.notes]
+        melody_onset_positions = [note.onset // coeff for note in melody.notes]
 
         # 2. Bass note onset position
         bass_note_1_class = chart_list_of_the_bar[0].chord_name[:1] if '#' not in chart_list_of_the_bar[0].chord_name else chart_list_of_the_bar[0].chord_name[:2]
@@ -436,19 +425,19 @@ class Arpeggiator:
         bass_note_1 = get_bass_note_seq(notes_first_half, bass_note_1_class)
         bass_note_2 = get_bass_note_seq(notes_second_half, bass_note_2_class)
         bass_notes = NoteSeq(bass_note_1.notes + bass_note_2.notes)
-        bass_onset_positions = [note.onset // 6 for note in bass_notes.notes]
-        bass_note_onset_pos_1 = [note.onset // 6 for note in bass_note_1.notes]
-        bass_note_onset_pos_2 = [note.onset // 6 for note in bass_note_2.notes]
+        bass_onset_positions = [note.onset // coeff for note in bass_notes.notes]
+        bass_note_onset_pos_1 = [note.onset // coeff for note in bass_note_1.notes]
+        bass_note_onset_pos_2 = [note.onset // coeff for note in bass_note_2.notes]
 
         # 3. Filling note density by position
-        fillings = get_filling_notes(notes_of_the_bar, melody, bass_notes)
-        fillings_density_by_position = get_filling_note_density_by_position(fillings)
+        fillings = self.get_filling_notes(notes_of_the_bar, melody, bass_notes)
+        fillings_density_by_position = self.get_filling_note_density_by_position(fillings)
 
         # 4. Filling sub-melody contour (highest note of filling notes in each onset position)
-        sub_melody_contour = get_filling_submelody_contour(fillings)
+        sub_melody_contour = self.get_filling_submelody_contour(fillings)
 
         # Generate an empty tab
-        tab = Tab()
+        tab = Tab(n_positions=MAX_POSITIONS)
 
         # Fill melody note to melody note position
         chart_1 = chart_list_of_the_bar[0]
@@ -460,23 +449,16 @@ class Arpeggiator:
         for psf in melody_psf:
             pos, string_id, fret, note_name = psf
             tab.add_note(pos, string_id, fret)
-        # for psf in psf_1:
-        #     pos, string_id, fret, note_name = psf
-        #     tab.add_note(pos, string_id, fret)
-        # for psf in psf_2:
-        #     pos, string_id, fret, note_name = psf
-        #     tab.add_note(pos, string_id, fret)
-        
         
         # Fill bass note to bass position
         # Get string-fret pair for bass notes (chord root) from the chart
         bass_notes_psf = []
         bass_sf_1 = self.get_bass_sf_from_chart(chart_1)
-        bass_sf_2 = self.get_bass_sf_from_chart(chart_2)
         for pos in bass_note_onset_pos_1:
             string_id, fret = bass_sf_1
             tab.add_note(pos, string_id, fret)
             bass_notes_psf.append((pos, string_id, fret))
+        bass_sf_2 = self.get_bass_sf_from_chart(chart_2)
         for pos in bass_note_onset_pos_2:
             string_id, fret = bass_sf_2
             tab.add_note(pos, string_id, fret)
@@ -491,23 +473,22 @@ class Arpeggiator:
         # Add fills: 
         '''
         这个算法用于为吉他独奏编曲中的“填充声部”（filling）部分分配右手手指（或弦位），以最大程度还原原曲质感。
-
-        首先，在没有弹奏任何主旋律和低音的情况下，放上剩下的音符中最高音的音符
-
-        首先，从去除主旋律和低音后的原曲 MIDI 中提取每个位置的填充音符，识别出在每个和弦块（chord block）中 
-            filling 部分的最高音，并将这些最高音连成一个“filling melody contour”。根据该 contour 的平均音高判断其整体处于高音区还是低音区。
-
-        接着，计算每个非主旋律、非低音位置上的填充音符密度，并取所有位置的中位数作为 density 阈值。
-
-        最后，对于每个 filling 位置，若其密度高于中位数，则分配两个手指进行填充（即两个音）；否则仅分配一个音，
-            并根据 filling melody contour 所在音区，选择靠近的高音弦或低音弦来放置音符。
-
-        该策略在尽量还原原曲的同时，控制右手复杂度，并利用简单规则生成合理可演奏的填充纹理。
+        首先找到需要加填充音的地方 （没有旋律音的位置，也可以进一步加上非bass音位置的需求）
+        然后根据filling melody contour的平均音高，判断整体是高音区还是低音区
+        分配不同的弦给不同音区的filling note
         '''
         # Step 1: Find all positions that need filling notes (positions that does not have melody notes)
-        all_positions = set(range(0, 8))
+        
+        all_positions = set(range(0, MAX_POSITIONS))
         melody_positions = set(melody_onset_positions)
+
+        # Remove melody positions and/or bass positions from all positions
         filling_positions = all_positions - melody_positions # - set(bass_onset_positions)
+        
+        # Remove empty positions (no notes at all)
+        note_positions = set([note.onset // coeff for note in notes_of_the_bar.notes])
+        filling_positions = filling_positions & note_positions
+        
         filling_positions = list(filling_positions)
         filling_positions.sort()  # Sort positions for consistent processing
 
@@ -516,7 +497,7 @@ class Arpeggiator:
             return tab
 
         # Check melody notes occupy which string in each position
-        melody_strings_used_by_position = [-1]*8 # String 6~1 means lowest to highest. 0 means no melody note
+        melody_strings_used_by_position = [-1] * self.time_res # String 6~1 means lowest to highest. 0 means no melody note
         for psf in melody_psf:
             pos, string_id, fret, note_name = psf
             if string_id > 0:
@@ -529,7 +510,7 @@ class Arpeggiator:
                 melody_strings_used_by_position[pos] = prev_melody_string
             
         # Check which string is occupied by bass note for each filling position
-        bass_strings_used_by_position = [-1]*8 # String 6~1 means lowest to highest. 0 means no bass note
+        bass_strings_used_by_position = [-1] * self.time_res # String 6~1 means lowest to highest. 0 means no bass note
 
         # Check if any usable filling notes in the chart (higher than bass string)
         for psf in bass_notes_psf:
@@ -543,7 +524,7 @@ class Arpeggiator:
                 bass_strings_used_by_position[pos] = prev_bass_string
 
         # Step 2: Determine the countour of filling notes
-        sub_mel_pitch = [0] * 8
+        sub_mel_pitch = [0] * self.time_res
         for pos in filling_positions:
             # Get the highest note in the filling contour at this position
             highest_note = sub_melody_contour.get(pos, None)
@@ -552,21 +533,18 @@ class Arpeggiator:
         all_sub_mel_pitch = [pitch for pitch in sub_mel_pitch if pitch > 0]  # Filter out zero pitches
 
         # Do a binary classification of it, to determine assign to high or low string
-        voice_assign = [-1] * 8  # -1 means not assigned, 0 means low string, 1 means high string
+        voice_assign = [-1] * self.time_res  # -1 means not assigned, 0 means low string, 1 means high string
         sub_mel_pitch_mean = sum(all_sub_mel_pitch) / len(all_sub_mel_pitch)
         for pos in filling_positions:
             if sub_mel_pitch[pos] > sub_mel_pitch_mean:
                 voice_assign[pos] = 1
             else:
                 voice_assign[pos] = 0
-        voice_first_half = voice_assign[:4]
-        voice_second_half = voice_assign[4:]
-        bass_string_first_half = bass_strings_used_by_position[:4]
-        bass_string_second_half = bass_strings_used_by_position[4:]
 
+        # Step 3: Assign strings to filling notes
         # For each half of the bar, assign filling notes
         # Determine strings to use for filling notes based on voice_assign, bass_string_used_by_position, and melody_strings_used_by_position
-        string_to_use = [-1] * 8  # (low_string, high_string) for each position
+        string_to_use = [-1] * self.time_res  # (low_string, high_string) for each position
         for pos in filling_positions:
             mel_string = melody_strings_used_by_position[pos]
             bass_string = bass_strings_used_by_position[pos]
@@ -598,6 +576,7 @@ class Arpeggiator:
                 elif voice_assign[pos] == 0: # Low voice
                     string_to_use[pos] = bass_string
 
+        # Step 4: Fill the filling notes into the tab
         sfs_1 = chart_1.string_fret_list
         sfs_2 = chart_2.string_fret_list
         # Fill the filling notes into the tab
@@ -620,9 +599,6 @@ class Arpeggiator:
             psf = (pos, sf_selected[0], sf_selected[1])  # (position, string_id, fret)
 
             tab.add_note(psf[0], psf[1], psf[2])  # Add the note to the tab
-            b = 2
-
-        a = 2
 
         return tab
     
@@ -637,10 +613,11 @@ class Arpeggiator:
         Returns:
             List of tuples (string_id, fret, note_name) for each melody note found in the chart.
         """
+        coeff = 48 // self.time_res
         result = []
 
         for melody_note in melody:
-            pos = melody_note.onset // 6  # Convert to 8th note position
+            pos = melody_note.onset // coeff  # Convert to 8th note position
             note_name = melody_note.get_note_name()
 
             # Find the string-fret pair for this melody note in the chart
@@ -683,11 +660,71 @@ class Arpeggiator:
         for melody_of_bar, chart_list_of_bar, note_seq_of_bar in zip(melody, chart_list_of_bars, note_seq_of_the_song):
             tab_of_the_bar = self.arpeggiate_a_bar(melody_of_bar, chart_list_of_bar, note_seq_of_bar)
             tab_of_the_bars.append(tab_of_the_bar)
-            a = 2
-        tab_of_the_song = TabSeq(tab_of_the_bars)
+        tab_of_the_song = TabSeq(tab_of_the_bars, tab_per_row=2)
         
         
         return tab_of_the_song
+
+    def get_filling_submelody_contour(self, filling_notes: 'NoteSeq') -> dict:
+        """
+        Calculate the filling sub-melody contour: for each onset position,
+        find the highest note (by pitch) among filling notes.
+
+        Args:
+            filling_notes: NoteSeq object containing only filling notes (each note must have .onset and .pitch).
+
+        Returns:
+            Dictionary mapping onset position (int) to the highest filling note (Note object).
+        """
+        coeff = 48 // self.time_res
+
+        contour = {}
+        onset_dict = {}
+        for note in filling_notes.notes:
+            onset = note.onset // coeff  # Convert to 8th note position if needed
+            onset_dict.setdefault(onset, []).append(note)
+        for onset, notes_at_onset in onset_dict.items():
+            highest_note = max(notes_at_onset, key=lambda n: n.pitch)
+            contour[onset] = highest_note
+        return contour
+    
+    def get_filling_note_density_by_position(self, filling_notes: 'NoteSeq') -> dict:
+        """
+        Calculate the filling note density for each onset position directly from filling_notes.
+
+        Args:
+            filling_notes: NoteSeq object containing only filling notes (each note must have .onset).
+
+        Returns:
+            Dictionary mapping onset position (int) to filling note density (int).
+        """
+        coeff = 48 // self.time_res
+
+        density_by_position = {}
+        for note in filling_notes.notes:
+            onset = note.onset // coeff  # Convert to 8th note position if needed
+            density_by_position[onset] = density_by_position.get(onset, 0) + 1
+        return density_by_position
+    
+    def get_filling_notes(self, note_seq: 'NoteSeq', melody_seq: 'NoteSeq', bass_seq: 'NoteSeq') -> 'NoteSeq':
+        """
+        Return a NoteSeq containing notes that are neither melody nor bass notes.
+
+        Args:
+            note_seq: NoteSeq object containing all notes.
+            melody_seq: NoteSeq object containing melody notes.
+            bass_seq: NoteSeq object containing bass notes.
+
+        Returns:
+            NoteSeq containing only filling notes.
+        """
+        melody_set = set((note.onset, note.pitch) for note in melody_seq.notes)
+        bass_set = set((note.onset, note.pitch) for note in bass_seq.notes)
+        filling_notes = [
+            note for note in note_seq.notes
+            if (note.onset, note.pitch) not in melody_set and (note.onset, note.pitch) not in bass_set
+        ]
+        return NoteSeq(filling_notes)
 
 
 class DurationRenderer:
@@ -751,64 +788,13 @@ def get_bass_note_seq_old(note_seq: 'NoteSeq', chord_root: str) -> 'NoteSeq':
     return NoteSeq(bass_notes)
 
 
-def get_filling_notes(note_seq: 'NoteSeq', melody_seq: 'NoteSeq', bass_seq: 'NoteSeq') -> 'NoteSeq':
-    """
-    Return a NoteSeq containing notes that are neither melody nor bass notes.
-
-    Args:
-        note_seq: NoteSeq object containing all notes.
-        melody_seq: NoteSeq object containing melody notes.
-        bass_seq: NoteSeq object containing bass notes.
-
-    Returns:
-        NoteSeq containing only filling notes.
-    """
-    melody_set = set((note.onset, note.pitch) for note in melody_seq.notes)
-    bass_set = set((note.onset, note.pitch) for note in bass_seq.notes)
-    filling_notes = [
-        note for note in note_seq.notes
-        if (note.onset, note.pitch) not in melody_set and (note.onset, note.pitch) not in bass_set
-    ]
-    return NoteSeq(filling_notes)
 
 
-def get_filling_note_density_by_position(filling_notes: 'NoteSeq') -> dict:
-    """
-    Calculate the filling note density for each onset position directly from filling_notes.
-
-    Args:
-        filling_notes: NoteSeq object containing only filling notes (each note must have .onset).
-
-    Returns:
-        Dictionary mapping onset position (int) to filling note density (int).
-    """
-    density_by_position = {}
-    for note in filling_notes.notes:
-        onset = note.onset // 6  # Convert to 8th note position if needed
-        density_by_position[onset] = density_by_position.get(onset, 0) + 1
-    return density_by_position
 
 
-def get_filling_submelody_contour(filling_notes: 'NoteSeq') -> dict:
-    """
-    Calculate the filling sub-melody contour: for each onset position,
-    find the highest note (by pitch) among filling notes.
 
-    Args:
-        filling_notes: NoteSeq object containing only filling notes (each note must have .onset and .pitch).
 
-    Returns:
-        Dictionary mapping onset position (int) to the highest filling note (Note object).
-    """
-    contour = {}
-    onset_dict = {}
-    for note in filling_notes.notes:
-        onset = note.onset // 6  # Convert to 8th note position if needed
-        onset_dict.setdefault(onset, []).append(note)
-    for onset, notes_at_onset in onset_dict.items():
-        highest_note = max(notes_at_onset, key=lambda n: n.pitch)
-        contour[onset] = highest_note
-    return contour
+
 
 
 if __name__ == '__main__':

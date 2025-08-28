@@ -232,6 +232,10 @@ class Tab:
         Each pressed fret in self.matrix is converted to a note.
         onset and duration are both multiplied by 6.
         """
+        remi_z_time_res = 48
+        tab_time_res = 16
+        coeff = remi_z_time_res // tab_time_res  # 3
+
         notes = {}
         n_positions = self.matrix.shape[1]
         n_strings = self.matrix.shape[0]
@@ -244,8 +248,8 @@ class Tab:
                     string_id = s + 1
                     fretboard = Fretboard()
                     pitch = fretboard.get_pitch(s, fret)
-                    onset = p_pos * 6
-                    dur = 6  # Default duration, you can adjust if needed
+                    onset = p_pos * coeff
+                    dur = coeff  # Default duration, you can adjust if needed
                     velocity = 96  # Default velocity
                     note = [int(pitch), dur, velocity]
                     if onset not in notes:
@@ -255,21 +259,24 @@ class Tab:
         tempo = 120  # Default tempo, can be adjusted as needed
         return Bar(id=-1, notes_of_insts={0:notes}, time_signature=time_signature, tempo=tempo)
 
+
 class TabSeq:
     '''
     A container for multiple Tabs.
     For user-friendly display of song-level tabs.
     '''
-    def __init__(self, tab_list:List[Tab]=None):
+    def __init__(self, tab_list:List[Tab]=None, tab_per_row=2):
         '''
         Initialize with a list of Tab objects.
+        Recommend to set tab_per_row to 4 when tab_list use 8 positions. And set to 2 when tab_list use 16 positions.
         '''
         self.tab_list = tab_list if tab_list is not None else []
+        self.tab_per_row = tab_per_row
 
     def __str__(self):
         """
         Return a string representation of the TabSeq.
-        Each line shows 4 Tabs in a row, properly aligned.
+        Each line shows self.tab_per_row Tabs in a row, properly aligned.
         The first row displays chord names if available, using Tab.chord_dict.
         The first chord is aligned with the beginning of the bar,
         and the second chord is aligned right after the middle of the bar.
@@ -277,11 +284,12 @@ class TabSeq:
         tab_lines_list = [str(tab).split('\n') for tab in self.tab_list]
         tab_height = len(tab_lines_list[0]) if tab_lines_list else 0
         lines = []
-        for i in range(0, len(tab_lines_list), 4):
-            row_tabs = tab_lines_list[i:i + 4]
-            tab_objs = self.tab_list[i:i + 4]
-            # Pad with empty tabs if less than 4
-            while len(row_tabs) < 4:
+        tabs_per_row = self.tab_per_row
+        for i in range(0, len(tab_lines_list), tabs_per_row):
+            row_tabs = tab_lines_list[i:i + tabs_per_row]
+            tab_objs = self.tab_list[i:i + tabs_per_row]
+            # Pad with empty tabs if less than tabs_per_row
+            while len(row_tabs) < tabs_per_row:
                 row_tabs.append([' ' * (len(row_tabs[0][0]) if row_tabs else 10)] * tab_height)
                 tab_objs.append(None)
             # First row: chord names, aligned to positions
