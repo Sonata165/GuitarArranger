@@ -29,8 +29,8 @@ class ArrangerSystem:
         song_name = midi_fp.split('/')[-1].split('.')[0]
         print(f'Arranging song: {song_name}')
         
-        bar_start = 0
-        bar_duration = 4
+        bar_start = 60
+        bar_duration = 8
         bar_end = bar_start + bar_duration
 
         save_name = f'{song_name}_bar_{bar_start}_{bar_end}'
@@ -251,7 +251,7 @@ class Voicer:
         ret = []
         for position in possible_positions:
             # Find all chord note in that position (try press)
-            chord_str = f'{block.chord[0]}{block.chord[1]}'
+            chord_str = f'{block.chord[0]}{block.chord[1]}' if block.chord is not None else 'N/A'
             chord_note_sfs = self.fretboard.press_chord(chord_str, 
                                                         position=position, 
                                                         string_press_once=False, 
@@ -321,8 +321,17 @@ class Voicer:
         Uses Dijkstra's algorithm to find the path with minimal sum of avg_fret differences.
         '''
         import heapq
-        if not chart_candidates_seq or not all(chart_candidates_seq):
+        if not chart_candidates_seq and not all(chart_candidates_seq):
             return []
+        
+        # # Remove empty chart candidate layers
+        # chart_candidates_seq = [layer for layer in chart_candidates_seq if layer]
+
+        # If any layer is empty, copy the previous layer
+        for i in range(1, len(chart_candidates_seq)):
+            if not chart_candidates_seq[i]:
+                chart_candidates_seq[i] = chart_candidates_seq[i-1]
+
         n_layers = len(chart_candidates_seq)
         # Each node is (layer_idx, chart_idx)
         # Dijkstra: (total_cost, layer_idx, chart_idx, path_so_far)
@@ -496,6 +505,10 @@ class Arpeggiator:
         if len(filling_positions) == 0:
             return tab
 
+        # If no filling notes, return the tab with melody and bass notes only
+        if len(fillings.notes) == 0:
+            return tab
+        
         # Check melody notes occupy which string in each position
         melody_strings_used_by_position = [-1] * self.time_res # String 6~1 means lowest to highest. 0 means no melody note
         for psf in melody_psf:

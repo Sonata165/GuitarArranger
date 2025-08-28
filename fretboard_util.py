@@ -563,6 +563,9 @@ class Fretboard:
             >>> fretboard.get_chord_notes("G7")
             ['G', 'B', 'D', 'F']
         """
+        if chord_name == 'N/A':
+            return []
+
         # Convert flat notes to sharp notes
         flat_to_sharp = {
             'Ab': 'G#', 'Bb': 'A#', 'Cb': 'B', 'Db': 'C#', 'Eb': 'D#', 'Fb': 'E', 'Gb': 'F#'
