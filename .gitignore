@@ -3,6 +3,7 @@ REMI-z
 .DS_Store
 Cubase Projects
 outputs
+SonataUtil
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

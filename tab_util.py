@@ -1,7 +1,8 @@
 from fretboard_util import Fretboard
-import numpy as np
 from remi_z import Bar, MultiTrack
+import numpy as np
 from typing import List
+
 
 class Chart:
     '''
@@ -128,10 +129,10 @@ class Chart:
 
     def __repr__(self):
         return f"Chart(position={self.position}, avg_fret={self.avg_fret:.2f})"
-    
+
     def __eq__(self, other):
         return self.position == other.position and self.string_fret_list == other.string_fret_list
-    
+
     def get_position(self):
         return self.position
 
@@ -149,9 +150,9 @@ class Chart:
             avg_fret = sum(pressed_frets) / len(pressed_frets)
         else:
             avg_fret = 0
-        
+
         return avg_fret
-    
+
     def fret_more_note(self, notes_sfs, melody_list=None, chord_name=None):
         """Extend the string_fret_list by adding a list of (string_id, fret) tuples."""
         self.string_fret_list.extend(notes_sfs)
@@ -172,7 +173,7 @@ class Chart:
             if self.fretboard.get_note_name(string_id, fret) == note_name:
                 return sf
         return None
-    
+
 
 class Tab:
     """
@@ -224,7 +225,7 @@ class Tab:
         '''
         if position_id < 0 or position_id >= self.matrix.shape[1]:
             raise ValueError(f"Position must be between 0 and {self.matrix.shape[1] - 1}.")
-        self.chord_dict[position_id] = chord_name 
+        self.chord_dict[position_id] = chord_name
 
     def convert_to_bar(self):
         """
@@ -320,7 +321,7 @@ class TabSeq:
                 lines.append(row_line)
             lines.append('')
         return '\n'.join(lines)
-    
+
     def save_to_file(self, filename):
         """
         Save the TabSeq to a text file.

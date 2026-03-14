@@ -690,26 +690,35 @@ class Fretboard:
                     force_highest_string: Optional[int] = None
                     ) -> List[Tuple[int, int]]:
         """Press a chord at a specific position.
-        
+
         Args:
-            chord_name: Name of the chord (e.g., "C", "Am", "G7")
+            chord_name: Name of the chord (e.g., "C", "Am/G", "G7"). Slash notation
+                sets the bass note (e.g., "C/E" means C major with E in the bass).
             position: Starting fret position (None means lowest possible position)
             string_press_once: If True, each string will be pressed at most once, choosing the lowest fret
-            enforce_root: If True, ensure the lowest pressed string plays the root note
+            enforce_root: If True, ensure the lowest pressed string plays the bass note
+                (the note after '/' in slash chords, or the root otherwise)
             closed: If True, do not use any open strings (0-fret notes)
             force_highest_pitch: If set, do not press any chord note whose pitch is strictly larger than this note (e.g., 'C#3')
             force_highest_string: If set, do not press any chord note whose string number is strictly larger than this number
-            
+
         Returns:
             List of (string_id, fret) tuples for the pressed positions
         """
+        # Parse slash chord: "Am/G" → chord_base="Am", bass_note="G"
+        if '/' in chord_name:
+            chord_base, bass_note = chord_name.split('/', 1)
+        else:
+            chord_base = chord_name
+            bass_note = None  # will be set to root below
+
         # Initialize status matrix
         if self.status_matrix is None:
             self.status_matrix = np.zeros((6, 21), dtype=bool)
         self.status_matrix.fill(False)  # Clear previous positions
-        
-        # Get all playable positions for the chord
-        playable_positions = self.find_playable_position_of_chord(chord_name)
+
+        # Get all playable positions for the chord (use chord_base, ignoring bass)
+        playable_positions = self.find_playable_position_of_chord(chord_base)
         
         if not playable_positions:
             raise ValueError(f"No playable positions found for chord {chord_name}")
@@ -724,7 +733,7 @@ class Fretboard:
             target_position = min(playable_positions)
         
         # Get all possible positions for the chord at the target position
-        all_positions = self.find_all_SF_of_chord_notes(chord_name, press=False, position=target_position)
+        all_positions = self.find_all_SF_of_chord_notes(chord_base, press=False, position=target_position)
         
         # Apply force_highest_pitch filter if set
         if force_highest_pitch is not None:
@@ -747,21 +756,22 @@ class Fretboard:
         
         if not string_press_once:
             if enforce_root:
-                root_note = chord_name[0]
-                if len(chord_name) > 1 and chord_name[1] == '#':
-                    root_note += '#'
+                if bass_note is None:
+                    bass_note = chord_base[0]
+                    if len(chord_base) > 1 and chord_base[1] == '#':
+                        bass_note += '#'
                 # Sort all_positions by string (6->1), then by fret (low->high)
                 sorted_positions = sorted(
                     [p for p in all_positions if not closed or p[1] > 0],
                     key=lambda x: (6 - x[0], x[1])
                 )
                 pressed_positions = []
-                found_root = False
+                found_bass = False
                 for string_id, fret in sorted_positions:
                     note = self.get_note_class(string_id, fret)
-                    if not found_root:
-                        if note == root_note:
-                            found_root = True
+                    if not found_bass:
+                        if note == bass_note:
+                            found_bass = True
                             self.status_matrix[string_id-1][fret] = True
                             pressed_positions.append((string_id, fret))
                         # else: skip this position
@@ -787,22 +797,23 @@ class Fretboard:
                         string_positions[string_id] = []
                     string_positions[string_id].append((string_id, fret))
             
-            # Get root note of the chord
-            root_note = chord_name[0]  # First character is the root note
-            if len(chord_name) > 1 and chord_name[1] == '#':
-                root_note += '#'  # Handle sharp notes
-            
+            # Determine bass note to enforce
+            if bass_note is None:
+                bass_note = chord_base[0]
+                if len(chord_base) > 1 and chord_base[1] == '#':
+                    bass_note += '#'
+
             # For each string, select the position with the lowest fret
             for string_id in range(6, 0, -1):  # From lowest to highest string
                 if string_id in string_positions:
                     positions = sorted(string_positions[string_id], key=lambda x: x[1])
-                    
+
                     if enforce_root and not selected_positions:  # Only for the lowest string with positions
-                        # Try to find root note position
-                        root_positions = [pos for pos in positions if self.get_note_class(pos[0], pos[1]) == root_note]
-                        if root_positions:
-                            selected_positions.append(root_positions[0])  # Take the lowest fret for root note
-                        continue  # Skip this string if no root note found
+                        # Try to find bass note position
+                        bass_positions = [pos for pos in positions if self.get_note_class(pos[0], pos[1]) == bass_note]
+                        if bass_positions:
+                            selected_positions.append(bass_positions[0])  # Take the lowest fret for bass note
+                        continue  # Skip this string if no bass note found
                     
                     # If not enforcing root or not the lowest string, take the lowest fret
                     selected_positions.append(positions[0])
