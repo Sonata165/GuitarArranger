@@ -14,15 +14,16 @@ from sonata_utils import jpath, create_dir_if_not_exist
 def main():
     arranger = ArrangerSystem()
     
-    midi_fp = "misc/001.mid"
-    # midi_fp = 'misc/canon_in_D.mid'
+    # midi_fp = "misc/001.mid"
+    midi_fp = 'misc/midis/canon_in_D.mid'
 
     arranger.arrange_song_from_midi(
         midi_fp,
         start_bar=8,
         n_bars=8,
-        melody_method="inst_id_13",
-        pitch_shift=2,
+        # melody_method="inst_id_13",
+        melody_method="hi_note_dur",
+        pitch_shift=-9,
     )
 
 
