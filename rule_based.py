@@ -113,7 +113,7 @@ class ArrangerSystem:
         mt.set_tempo(90)
 
         # Save the note sequence to MIDI
-        midi_fp = jpath(save_dir, f"{save_name}.midi")
+        midi_fp = jpath(save_dir, f"{save_name}.mid")
         print(f"Saving MIDI to {midi_fp}")
         mt.to_midi(midi_fp)
 

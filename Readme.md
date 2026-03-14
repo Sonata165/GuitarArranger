@@ -10,6 +10,17 @@ This tool generates solo guitar arrangements from any MIDI song. It models both 
 - **`REMI-z/`** — Submodule for MIDI encoding/tokenization (`remi_z` package).
 - **`SonataUtil/`** — Personal utility library.
 
+## Output
+
+For each processed segment (e.g. `caihong_bar_0_4`), the system writes the following files to `outputs/<song>/<segment>/`:
+
+| File | Description |
+|------|-------------|
+| `<segment>.mid` / `.wav` | Full arrangement (melody + chord voicing) as MIDI and rendered audio |
+| `<segment>_melody.mid` / `_melody.wav` | Isolated melody line as MIDI and rendered audio |
+| `<segment>_chart.txt` | Per-block fretboard diagrams showing chord name, melody notes, and exact finger positions per string/fret (`X` = muted) |
+| `<segment>_tab.txt` | Full 6-string guitar tablature across time (fret numbers or `--` for silence) |
+
 ## Usage
 
     python rule_based.py
